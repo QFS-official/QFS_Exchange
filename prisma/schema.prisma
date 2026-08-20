@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash    String
+  name            String?
+  phone           String?
+  country         String?
+  referralCode    String?   @unique
+  referredBy    String?
+  avatar        String?
+  role          String    @default("user") // user, vip
+  kycLevel      Int       @default(0) // 0=none, 1=email, 2=id
+  twoFactor       Boolean   @default(false)
+  twoFactorSecret String?
+  antiPhishingCode String?
+  socialLogin     Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  sessions        Session[]
+  kycSubmissions  KycSubmission[]
+  passwordResets  PasswordReset[]
+  socialAccounts  SocialAccount[]
+}
+
+model KycSubmission {
+  id              String   @id @default(cuid())
+  userId          String
+  level           Int      // 1=email, 2=id, 3=address
+  status          String   @default("pending") // pending, approved, rejected, review
+  documentType    String?  // "passport", "dni", "driver_license", "cedula"
+  documentNumber  String?
+  documentFront   String?  // filename or base64
+  documentBack    String?  // filename or base64
+  selfieWithId    String?  // filename or base64
+  fullName        String?
+  dob             String?  // date of birth
+  address         String?
+  city            String?
+  addressProof    String?  // filename or base64
+  rejectReason    String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, level])
+  @@index([status])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  token        String   @unique
+  userAgent    String?
+  ip           String?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id            String   @id @default(cuid())
+  walletAddress String
+  pair          String   // e.g. "GCRM_USDT"
+  side          String   // "buy" | "sell"
+  type          String   // "limit" | "market" | "stop"
+  price         Float    // limit price (0 for market)
+  stopPrice     Float?   // stop trigger price
+  amount        Float    // base token amount
+  filledAmount  Float    @default(0)
+  remainingAmount Float  @default(0)
+  total         Float    // quote total (price * amount)
+  fee           Float    @default(0)
+  status        String   @default("open") // "open", "partial", "filled", "cancelled", "rejected"
+  chainId       Int
+  baseSymbol    String
+  quoteSymbol   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trades        Trade[]
+}
+
+model Trade {
+  id            String   @id @default(cuid())
+  orderId       String
+  pair          String
+  side          String   // side of the taker
+  price         Float
+  amount        Float
+  total         Float
+  fee           Float    @default(0)
+  makerWallet   String?
+  takerWallet   String?
+  isMaker       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model AirdropRegistration {
+  id              String   @id @default(cuid())
+  username        String
+  email           String
+  wallet          String
+  completedTasks  String   @default("[]") // JSON array
+  referralCode    String   @unique
+  referredBy      String?
+  gcrmEarned      Int      @default(0)
+  status          String   @default("pending") // pending, validated-3h, validated-72h, completed
+  validatedBy     String?
+  validatedAt     DateTime?
+  ipAddress       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ExchangeBalance {
+  id            String   @id @default(cuid())
+  walletAddress String
+  symbol        String   // "USDT", "GCRM", "QFS", "ALARAB", "NESG"
+  available     Float    @default(0)
+  frozen        Float    @default(0) // locked in open orders
+  updatedAt     DateTime @updatedAt
+
+  @@unique([walletAddress, symbol])
+}
+
+model StakingPool {
+  id          String   @id @default(cuid())
+  symbol      String
+  name        String
+  apy         Float
+  lockDays    Int      @default(0)
+  minStake    Float    @default(0)
+  totalStaked Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  positions   StakingPosition[]
+}
+
+model StakingPosition {
+  id            String    @id @default(cuid())
+  walletAddress String
+  poolId        String
+  amount        Float
+  rewardDebt    Float     @default(0)
+  pendingReward  Float     @default(0)
+  startTime     DateTime
+  endTime       DateTime?
+  status        String    @default("active")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  pool          StakingPool @relation(fields: [poolId], references: [id])
+
+  @@index([walletAddress, status])
+}
+
+model WalletTransaction {
+  id            String   @id @default(cuid())
+  walletAddress String
+  type          String   // "deposit" | "withdraw"
+  symbol        String   // "USDT", "GCRM", "QFS", "ALARAB", "NESG"
+  amount        Float
+  fee           Float    @default(0)
+  status        String   @default("pending") // "pending", "processing", "completed", "failed", "rejected", "cancelled"
+  txHash        String?  // on-chain tx hash (for reference)
+  toAddress     String?  // destination address (withdraw) or deposit address
+  fromAddress   String?  // source address (deposit) or from address (withdraw)
+  network       String   @default("Ethereum") // "Ethereum", "Polygon", "BSC", "Tron"
+  memo          String?  // optional memo/tag
+  note          String?  // internal note
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([walletAddress])
+  @@index([walletAddress, type])
+  @@index([status])
+}
+
+model LoanProduct {
+  id              String   @id @default(cuid())
+  symbol          String   // collateral symbol
+  borrowSymbol    String   // borrowed symbol (always USDT for now)
+  name            String
+  ltv             Float    // max loan-to-value ratio (e.g. 0.65 = 65%)
+  interestRate    Float    // annual interest rate (e.g. 0.05 = 5%)
+  maxLoanDuration Int      @default(30) // max days
+  minCollateral   Float    @default(0)
+  maxBorrow       Float    @default(100000)
+  isActive        Boolean  @default(true)
+  totalBorrowed   Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  positions       LoanPosition[]
+}
+
+model LoanPosition {
+  id              String   @id @default(cuid())
+  walletAddress   String
+  productId       String
+  collateralSymbol String
+  collateralAmount Float
+  borrowSymbol    String   // "USDT"
+  borrowAmount    Float
+  interestRate    Float
+  interestAccrued Float    @default(0)
+  status          String   @default("active") // "active", "repaid", "liquidated", "overdue"
+  startDate       DateTime @default(now())
+  dueDate         DateTime
+  repaidAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  product         LoanProduct @relation(fields: [productId], references: [id])
+
+  @@index([walletAddress, status])
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  code      String   // 6-digit code
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@index([expiresAt])
+}
+
+model SocialAccount {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String   // "google", "apple", "twitter"
+  providerAccountId String
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Visitor {
+  id            String   @id @default(cuid())
+  sessionId     String
+  walletAddress String?
+  ipAddress     String?
+  userAgent     String?
+  country       String?
+  page          String   @default("spot")
+  lastSeenAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([walletAddress])
+  @@index([lastSeenAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fee System — Trading Commission Audit Log
+// ═══════════════════════════════════════════════════════════════════════
+
+model FeeRecord {
+  id              String   @id @default(cuid())
+  walletAddress   String   // user wallet
+  pair            String   // e.g. "GCRM_USDT"
+  orderId         String   // order that generated this fee
+  tradeId         String   // specific trade that generated this fee
+  role            String   // "maker" | "taker"
+  side            String   // "buy" | "sell" (from this user's perspective)
+  baseSymbol      String   // e.g. "GCRM"
+  quoteSymbol     String   // e.g. "USDT"
+  price           Float    // execution price
+  amount          Float    // base amount traded
+  notional        Float    // price * amount (USDT value of the trade)
+  feeRate         Float    // applied rate e.g. 0.001 (0.1%)
+  vipDiscount     Float    @default(0) // VIP discount e.g. 0.2 (20%)
+  gcrmDiscount    Float    @default(0) // GCRM pay discount e.g. 0.25 (25%)
+  effectiveRate   Float    // feeRate * (1 - vipDiscount) * (1 - gcrmDiscount)
+  feeAmount       Float    // notional * effectiveRate
+  feeToken        String   // token in which fee was charged
+  gcrmEquivalent  Float?   // GCRM value of fee if paid in other token
+  createdAt       DateTime @default(now())
+
+  @@index([walletAddress])
+  @@index([pair])
+  @@index([createdAt])
+  @@index([role])
+}
